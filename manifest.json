@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Audio Filter",
+  "version": "1.0",
+  "permissions": ["storage"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icons/icon128.png"
+    },
+  "icons": {
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["content.js"]
+    }
+  ]
+}

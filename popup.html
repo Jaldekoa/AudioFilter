@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Audio Filter</title>
+    <link rel="stylesheet" href="popup.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <h1>Audio Filter</h1>
+        <label class="switch">
+            <input id="toggleFilter" type="checkbox" />
+            <span class="slider"></span>
+        </label>
+    </header>
+    <div class="control">
+        <div class="label">
+            <span>Frecuencia de corte:</span>
+            <span id="freqValue">773 Hz</span>
+        </div>
+        <div class="slider-container">
+            <input id="freqRange" type="range" min="0" max="1000" value="500" />
+            <div class="ticks">
+                <span style="left: 0%;">20 Hz</span>
+                <span style="left: 33.33%;">200 Hz</span>
+                <span style="left: 66.67%;">2 kHz</span>
+                <span style="left: 100%;">20 kHz</span>
+            </div>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
