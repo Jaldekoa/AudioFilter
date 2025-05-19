@@ -18,7 +18,7 @@ function updateSliderBackground(pos) {
 
 // Inicializa valores
 document.addEventListener('DOMContentLoaded', () => {
-  chrome.storage.local.get(['cutoffPos', 'filterOn'], ({ cutoffPos = 500, filterOn }) => {
+  chrome.storage.local.get(['cutoffPos', 'filterOn'], ({ cutoffPos = 1000, filterOn }) => {
     freqRange.value = cutoffPos;
     const freq = posToFreq(cutoffPos);
     freqValue.textContent = `${freq} Hz`;
