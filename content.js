@@ -1,203 +1,227 @@
 let audioContext = null;
 let filterNode = null;
-let mediaElementSources = new Map(); // Almacena HTMLMediaElement -> MediaElementAudioSourceNode
+let stereoPannerNode = null;
+let mediaElementSources = new Map();
 
-// Ayudante para conectar un único elemento multimedia al filtro
-function connectMediaToFilter(mediaElement) {
-  if (!audioContext || !filterNode || !mediaElement) return;
+// Función principal para configurar el procesamiento de audio
+async function setupAudioProcessing() {
+  try {
+    const settings = await chrome.storage.local.get(['cutoffFreq', 'filterOn', 'panValue']);
+    const { filterOn = false, cutoffFreq = 20000, panValue = 0 } = settings;
 
-  // Verifica si el mediaElement ya está siendo procesado por un AudioContext diferente
-  // Esto es una heurística, ya que no hay una forma directa de comprobarlo.
-  // Si mediaElement.srcObject es un MediaStream proveniente de otro AudioContext, podríamos tener problemas.
-  // Sin embargo, para createMediaElementSource, el elemento en sí es la fuente.
-
-  if (mediaElementSources.has(mediaElement)) {
-    // El elemento ya tiene una fuente, asegúrate de que esté conectada correctamente
-    const sourceNode = mediaElementSources.get(mediaElement);
-    try {
-      sourceNode.disconnect(); // Desconectar de conexiones previas
-    } catch (e) { /* Podría no haber estado conectado */ }
-    try {
-      sourceNode.connect(filterNode);
-    } catch (e) {
-      console.error('Error al reconectar la fuente existente al filtro:', e, mediaElement);
-      // Si la reconexión falla (p.ej., contexto incorrecto), intenta recrear la fuente.
-      mediaElementSources.delete(mediaElement); // Eliminar la fuente antigua
-      recreateAndConnectSource(mediaElement);
+    if (!filterOn) {
+      await teardownAudioProcessing();
+      return;
     }
-  } else {
-    // Nuevo elemento, crear fuente y conectar
-    recreateAndConnectSource(mediaElement);
+
+    // Configurar AudioContext si es necesario
+    if (!audioContext || audioContext.state === 'closed') {
+      if (audioContext) await teardownAudioProcessing();
+      audioContext = new AudioContext();
+    }
+
+    // Asegurar que el AudioContext esté activo
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+
+    // Configurar nodos de audio si es necesario
+    if (!filterNode) {
+      filterNode = audioContext.createBiquadFilter();
+      filterNode.type = 'lowpass';
+      filterNode.connect(audioContext.destination);
+    }
+
+    if (!stereoPannerNode) {
+      stereoPannerNode = audioContext.createStereoPanner();
+      filterNode.disconnect();
+      filterNode.connect(stereoPannerNode);
+      stereoPannerNode.connect(audioContext.destination);
+    }
+
+    // Actualizar valores del filtro
+    filterNode.frequency.setValueAtTime(cutoffFreq, audioContext.currentTime);
+    stereoPannerNode.pan.setValueAtTime(panValue / 100, audioContext.currentTime);
+
+    // Conectar elementos multimedia
+    connectAllMediaElements();
+
+  } catch (error) {
+    console.error('Error en setupAudioProcessing:', error);
+    await teardownAudioProcessing();
   }
 }
 
-function recreateAndConnectSource(mediaElement) {
-  if (!audioContext || !filterNode) return;
+// Función para conectar todos los elementos multimedia
+function connectAllMediaElements() {
+  document.querySelectorAll('video, audio').forEach(mediaElement => {
+    if (mediaElement.readyState >= 2) {
+      connectMediaToFilter(mediaElement);
+    } else {
+      mediaElement.addEventListener('canplay', () => connectMediaToFilter(mediaElement), { once: true });
+    }
+  });
+}
+
+// Función para conectar un elemento multimedia al filtro
+function connectMediaToFilter(mediaElement) {
+  if (!audioContext || !filterNode || !stereoPannerNode || !mediaElement) return;
+
   try {
-    const sourceNode = audioContext.createMediaElementSource(mediaElement);
-    mediaElementSources.set(mediaElement, sourceNode);
-    sourceNode.connect(filterNode);
-    // Reanudar AudioContext al reproducir, si estaba suspendido (p.ej., por políticas de autoplay)
-    mediaElement.addEventListener('play', () => {
-      if (audioContext && audioContext.state === 'suspended') {
-        audioContext.resume().catch(e => console.error("Error al reanudar AudioContext en play:", e));
+    if (mediaElementSources.has(mediaElement)) {
+      const sourceNode = mediaElementSources.get(mediaElement);
+      sourceNode.disconnect();
+      sourceNode.connect(filterNode);
+    } else {
+      const sourceNode = audioContext.createMediaElementSource(mediaElement);
+      mediaElementSources.set(mediaElement, sourceNode);
+      sourceNode.connect(filterNode);
+
+      // Configurar eventos del elemento multimedia
+      setupMediaElementEvents(mediaElement);
+    }
+  } catch (error) {
+    console.error('Error al conectar elemento multimedia:', error);
+  }
+}
+
+// Función para configurar eventos de elementos multimedia
+function setupMediaElementEvents(mediaElement) {
+  const handlePlay = async () => {
+    if (audioContext?.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch (e) {
+        console.error("Error al reanudar AudioContext:", e);
+      }
+    }
+  };
+
+  mediaElement.addEventListener('play', handlePlay);
+  mediaElement.addEventListener('pause', () => {
+    if (audioContext?.state === 'running') {
+      audioContext.suspend().catch(e => console.error("Error al suspender AudioContext:", e));
+    }
+  });
+
+  // Manejar eventos de pantalla completa
+  ['webkitbeginfullscreen', 'webkitendfullscreen', 'fullscreenchange'].forEach(event => {
+    mediaElement.addEventListener(event, handlePlay);
+  });
+}
+
+// Función para limpiar el procesamiento de audio
+async function teardownAudioProcessing() {
+  try {
+    // Desconectar todas las fuentes
+    mediaElementSources.forEach(sourceNode => {
+      try {
+        sourceNode.disconnect();
+      } catch (e) {
+        console.error("Error al desconectar fuente:", e);
+      }
+    });
+    mediaElementSources.clear();
+
+    // Limpiar nodos de audio
+    if (filterNode) {
+      try {
+        filterNode.disconnect();
+      } catch (e) {}
+      filterNode = null;
+    }
+
+    if (stereoPannerNode) {
+      try {
+        stereoPannerNode.disconnect();
+      } catch (e) {}
+      stereoPannerNode = null;
+    }
+
+    // Cerrar AudioContext solo si existe y no está cerrado
+    if (audioContext && audioContext.state && audioContext.state !== 'closed') {
+      try {
+        await audioContext.close();
+      } catch (error) {
+        console.error('Error al cerrar AudioContext:', error);
+      }
+    }
+    audioContext = null;
+
+    // Restaurar reproducción
+    document.querySelectorAll('video, audio').forEach(mediaElement => {
+      if (mediaElement.readyState >= 2 && !mediaElement.paused) {
+        mediaElement.pause();
+        setTimeout(() => {
+          mediaElement.play().catch(e => console.error("Error al reanudar reproducción:", e));
+        }, 100);
       }
     });
   } catch (error) {
-    console.error('Error al crear o conectar la fuente multimedia para:', mediaElement.src || mediaElement.id, error);
+    console.error('Error en teardownAudioProcessing:', error);
   }
 }
 
+// Observador para elementos multimedia dinámicos
+const mediaObserver = new MutationObserver(mutations => {
+  if (!filterNode || !audioContext || audioContext.state === 'closed') return;
 
-// Crear o actualizar el filtro
-async function setupAudioProcessing() {
-  const settings = await chrome.storage.local.get(['cutoffFreq', 'filterOn']);
-  const filterOn = settings.filterOn !== undefined ? settings.filterOn : false;
-  const cutoffFreq = settings.cutoffFreq !== undefined ? settings.cutoffFreq : 20000;
-
-  if (!filterOn) {
-    teardownAudioProcessing();
-    return;
-  }
-
-  // El filtro está ACTIVADO
-  if (!audioContext || audioContext.state === 'closed') {
-    try {
-      // Si había un contexto previo, asegurarse de que esté completamente limpio
-      if (audioContext) await teardownAudioProcessing();
-      audioContext = new AudioContext();
-      // Manejar cambios de estado de AudioContext (p.ej., para autoplay)
-      audioContext.onstatechange = () => {
-        if (audioContext && audioContext.state === 'suspended') {
-          audioContext.resume().catch(e => console.error("Error al reanudar AudioContext en statechange:", e));
-        }
-      };
-    } catch (error) {
-      console.error('Fallo al crear AudioContext:', error);
-      await teardownAudioProcessing(); // Limpiar si la creación del contexto falla
-      return;
-    }
-  }
-
-  // Reanudar si está suspendido
-  if (audioContext.state === 'suspended') {
-    await audioContext.resume().catch(e => console.error("Error al reanudar AudioContext:", e));
-  }
-
-  if (!filterNode) {
-    filterNode = audioContext.createBiquadFilter();
-    filterNode.type = 'lowpass';
-    // Conectar el filtro al destino UNA VEZ cuando se crea
-    filterNode.connect(audioContext.destination);
-  }
-
-  // Asegurarse de que la frecuencia se actualice incluso si el nodo ya existía
-  filterNode.frequency.setValueAtTime(cutoffFreq, audioContext.currentTime);
-
-  // Procesar todos los elementos multimedia actuales
-  document.querySelectorAll('video, audio').forEach(mediaElement => connectMediaToFilter(mediaElement));
-  // (MutationObserver manejará elementos añadidos dinámicamente)
-}
-
-// Limpiar nodos de procesamiento de audio y contexto
-async function teardownAudioProcessing() {
-  // Desconectar todas las fuentes del filtro
-  mediaElementSources.forEach((sourceNode) => {
-    try {
-      sourceNode.disconnect();
-    } catch (e) { /* ignorar */ }
-  });
-  mediaElementSources.clear(); // Las fuentes son inválidas después de que el contexto se cierra
-
-  if (filterNode) {
-    try {
-      filterNode.disconnect(); // Desconectar del destino y de cualquier fuente conectada
-    } catch (e) { /* ignorar */ }
-    filterNode = null;
-  }
-
-  if (audioContext && audioContext.state !== 'closed') {
-    try {
-      await audioContext.close();
-      console.log('AudioContext cerrado.');
-    } catch (error) {
-      console.error('Error al cerrar AudioContext:', error);
-    } finally {
-      audioContext = null;
-    }
-  } else {
-    audioContext = null; // Asegurarse de que sea null si ya estaba cerrado o no existía
-  }
-}
-
-// Observador para elementos multimedia añadidos/eliminados dinámicamente
-const mediaObserver = new MutationObserver((mutationsList) => {
-  // Solo actuar si el filtro se supone que está activo
-  // Comprobamos filterNode porque audioContext podría existir brevemente durante el teardown
-  if (!filterNode || !audioContext || audioContext.state === 'closed') {
-    return;
-  }
-  for (const mutation of mutationsList) {
+  mutations.forEach(mutation => {
     if (mutation.type === 'childList') {
       mutation.addedNodes.forEach(node => {
         if (node.nodeType === Node.ELEMENT_NODE) {
-          const elementsToProcess = [];
-          if (node.matches('video, audio')) {
-            elementsToProcess.push(node);
-          }
-          // También buscar dentro del nodo añadido
-          elementsToProcess.push(...Array.from(node.querySelectorAll('video, audio')));
+          const mediaElements = [];
+          if (node.matches('video, audio')) mediaElements.push(node);
+          mediaElements.push(...Array.from(node.querySelectorAll('video, audio')));
           
-          elementsToProcess.forEach(mediaEl => {
-            // Solo procesar si no tiene ya una fuente o si la fuente es de un contexto diferente (heurística)
+          mediaElements.forEach(mediaEl => {
             if (!mediaElementSources.has(mediaEl)) {
-                 connectMediaToFilter(mediaEl);
+              connectMediaToFilter(mediaEl);
             }
           });
         }
       });
-      // Manejar nodos eliminados para limpiar el mapa mediaElementSources
+
       mutation.removedNodes.forEach(node => {
         if (node.nodeType === Node.ELEMENT_NODE) {
-          const elementsToRemove = [];
-          if (node.matches('video, audio')) {
-            elementsToRemove.push(node);
-          }
-          elementsToRemove.push(...Array.from(node.querySelectorAll('video, audio')));
+          const mediaElements = [];
+          if (node.matches('video, audio')) mediaElements.push(node);
+          mediaElements.push(...Array.from(node.querySelectorAll('video, audio')));
           
-          elementsToRemove.forEach(mediaEl => {
+          mediaElements.forEach(mediaEl => {
             if (mediaElementSources.has(mediaEl)) {
               const source = mediaElementSources.get(mediaEl);
-              try { source.disconnect(); } catch(e) {/* ignorar */}
+              source.disconnect();
               mediaElementSources.delete(mediaEl);
             }
           });
         }
       });
     }
-  }
+  });
 });
 
-// Configuración inicial y listener de mensajes
+// Inicialización
 async function init() {
-  // Aplicar filtro al cargar, basado en la configuración guardada
-  await setupAudioProcessing(); 
-
-  // Observar el documento para elementos multimedia añadidos o eliminados
+  await setupAudioProcessing();
+  
   mediaObserver.observe(document.documentElement, {
     childList: true,
     subtree: true
   });
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'applyFilter') {
-      setupAudioProcessing().then(() => {
-        sendResponse({ status: 'Actualización del filtro procesada' });
-      }).catch(error => {
-        console.error("Error al procesar applyFilter:", error);
-        sendResponse({ status: 'Error al procesar filtro', error: error.message });
-      });
-      return true; // Mantener el canal de mensajes abierto para la respuesta asíncrona
+    if (message.type === 'applyFilter' || message.type === 'updateFilter') {
+      setupAudioProcessing()
+        .then(() => sendResponse?.({ status: 'success' }))
+        .catch(error => sendResponse?.({ status: 'error', error: error.message }));
+      return true;
+    }
+  });
+
+  chrome.storage.onChanged.addListener(async (changes, namespace) => {
+    if (namespace === 'local' && (changes.filterOn || changes.cutoffFreq || changes.panValue)) {
+      await setupAudioProcessing();
     }
   });
 }

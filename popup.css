@@ -78,6 +78,10 @@ h1::after {
   z-index: 0;
 }
 
+.control + .control {
+  margin-top: 18px;
+}
+
 .label {
   display: flex;
   justify-content: space-between;
@@ -255,6 +259,78 @@ h1::after {
   right: 0;
   bottom: 0;
   background: rgba(142, 84, 233, 0.1);
-  z-index: -1;
   border-radius: 10px;
+  z-index: -1;
+}
+
+/* Estilos para el control de panoramización */
+#panRange {
+  -webkit-appearance: none;
+  width: calc(100% - 30px);
+  margin: 0 15px;
+  height: 8px;
+  border-radius: 8px;
+  outline: none;
+  background: linear-gradient(90deg, #4776E6, #8E54E9);
+  position: relative;
+  z-index: 1;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+#panRange::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(78, 97, 230, 0.8);
+  margin-top: -6px;
+  border: 2px solid #8E54E9;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+#panRange::-webkit-slider-thumb:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 20px rgba(78, 97, 230, 0.9);
+}
+
+#panRange::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(78, 97, 230, 0.8);
+  border: 2px solid #8E54E9;
+  transition: all 0.2s ease;
+}
+
+#panRange::-moz-range-thumb:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 20px rgba(78, 97, 230, 0.9);
+}
+
+#panValue {
+  font-weight: 700;
+  color: transparent;
+  background: linear-gradient(90deg, #8E54E9, #4776E6);
+  -webkit-background-clip: text;
+  padding: 2px 8px;
+  border-radius: 10px;
+  position: relative;
+  text-shadow: 0 2px 10px rgba(142, 84, 233, 0.3);
+}
+
+#panValue::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(142, 84, 233, 0.1);
+  border-radius: 10px;
+  z-index: -1;
 }
